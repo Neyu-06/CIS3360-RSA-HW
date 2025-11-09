@@ -30,15 +30,13 @@ Due Date: Friday, November 07, 2025 at 11:59 PM ET
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
-#include <math.h>
 
-int isPrime(long long n);
+#define MAX_MESSAGE_SIZE 10000
+
+long long isPrime(long long num);
 long long gcd(long long a, long long b);
-long long extended_gcd(long long a, long long b, long long *x, long long *y);
-long long mod_inverse(long long e, long long phi_n);
-long long mod_exp(long long base, long long exp, long long mod);
-char* preprocess_message(const char *input);
-
+long long extendedEA(long long a, long long b, long long *x, long long *y);
+long long modExpo(long long base, long long exp, long long mod);
 
 int main(int argc, char *argv[]) {
     if (argc != 3) {
@@ -47,10 +45,11 @@ int main(int argc, char *argv[]) {
     }
 
     long long P, Q, E;
+    FILE *keypair_file = fopen(argv[1], "r");
     fscanf(keypair_file, "P: %lld\nQ: %lld\nE: %lld", &P, &Q, &E);
     fclose(keypair_file);
     
-    // Validate P
+    // Step 1: Prime Number Validation
     printf("P:\n");
     if (!isPrime(P)) {
         printf("Error: %lld is not a prime number\n", P);
@@ -58,7 +57,6 @@ int main(int argc, char *argv[]) {
     }
     printf("%lld is a prime number\n\n", P);
     
-    // Validate Q
     printf("Q:\n");
     if (!isPrime(Q)) {
         printf("Error: %lld is not a prime number\n", Q);
@@ -66,112 +64,111 @@ int main(int argc, char *argv[]) {
     }
     printf("%lld is a prime number\n\n", Q);
     
-    // Calculate N
+    // Step 2: Calculate N (RSA Modulus)
     long long N = P * Q;
     printf("N:\n%lld\n\n", N);
     
-    // Calculate phi(N)
-    long long phi_n = (P - 1) * (Q - 1);
-    printf("Totient of N:\n%lld\n\n", phi_n);
+    // Step 3: Calculate Euler’s Totient Function φ(N )
+    long long totient = (P - 1) * (Q - 1);
+    printf("Totient of N:\n%lld\n\n", totient);
     
-    // Validate E
+    // Step 4: Validate E (Public Exponent)
     printf("E:\n");
-    if (gcd(E, phi_n) != 1) {
-        printf("Error: %lld is not relatively prime to φ(N) = %lld\n", E, phi_n);
+    if (gcd(E, totient) != 1) {
+        printf("Error: %lld is not relatively prime to φ(N) = %lld\n", E, totient);
         return 1;
     }
-    printf("%lld is relatively prime to %lld\n\n", E, phi_n);
+    printf("%lld is relatively prime to %lld\n\n", E, totient);
     
-    // Calculate D
-    long long D = mod_inverse(E, phi_n);
-    if (D == -1) {
-        fprintf(stderr, "Error: Cannot calculate modular inverse\n");
-        return 1;
-    }
+    // Step 5: Calculate D (Private Exponent)
+    long long x, y;
+    extendedEA(E, totient, &x, &y);
+    long long D = (x % totient + totient) % totient;
     printf("D:\n%lld\n\n", D);
     
-    // Print key pairs
     printf("Public key pair:\n(%lld, %lld)\n\n", E, N);
     printf("Private key pair:\n(%lld, %lld)\n\n", D, N);
     
-    // Read message file
     FILE *message_file = fopen(argv[2], "r");
-    if (!message_file) {
-        fprintf(stderr, "Error: Cannot open message file %s\n", argv[2]);
-        return 1;
+    
+    char *message = malloc(MAX_MESSAGE_SIZE);
+
+    int len = 0;
+    int letter = 0;
+
+    while ((letter = fgetc(message_file)) != EOF) {
+        message[len++] = (char)letter;
     }
-    
-    // Read entire file content
-    fseek(message_file, 0, SEEK_END);
-    long file_size = ftell(message_file);
-    fseek(message_file, 0, SEEK_SET);
-    
-    char *message = (char*)malloc(file_size + 1);
-    fread(message, 1, file_size, message_file);
-    message[file_size] = '\0';
+
+    message[len] = '\0';
+
     fclose(message_file);
+
+    char *plaintext = malloc(len + 1);
+    int j = 0;
     
-    // Preprocess message
-    char *plaintext = preprocess_message(message);
+    for (int i = 0; i < len; i++) {
+        if (isalnum(message[i])) {
+            plaintext[j++] = message[i];
+        }
+    }
+    plaintext[j] = '\0';
+
     free(message);
     
     printf("Plaintext:\n%s\n\n", plaintext);
     
     // Encrypt message
-    int msg_len = strlen(plaintext);
-    long long *ciphertext = (long long*)malloc(msg_len * sizeof(long long));
+    int length = strlen(plaintext);
+    long long *ciphertext = malloc(length * sizeof(long long));
     
     printf("Encrypted message:\n");
-    for (int i = 0; i < msg_len; i++) {
+    for (int i = 0; i < length; i++) {
         long long m = (long long)plaintext[i];
-        ciphertext[i] = mod_exp(m, E, N);
-        if (i > 0) printf(" ");
-        printf("%lld", ciphertext[i]);
+        ciphertext[i] = modExpo(m, E, N);
+        printf("%lld ", ciphertext[i]);
     }
     printf("\n\n");
     
     // Decrypt message
     printf("Decrypted message:\n");
-    for (int i = 0; i < msg_len; i++) {
-        long long m = mod_exp(ciphertext[i], D, N);
-        char decrypted_char = (char)m;
-        if (i > 0) printf(" ");
-        printf("%c", decrypted_char);
+    for (int i = 0; i < length; i++) {
+        long long m = modExpo(ciphertext[i], D, N);
+        char decrypted = (char)m;
+        printf("%c ", decrypted);
     }
     printf("\n");
     
-    // Cleanup
     free(plaintext);
     free(ciphertext);
     
     return 0;
 }
 
-// Function to check if a number is prime
-int isPrime(long long n) {
-    if (n <= 1) return 0;
-    if (n <= 3) return 1;
-    if (n % 2 == 0 || n % 3 == 0) return 0;
-    
-    long long sqrt_n = (long long)sqrt((double)n);
-    for (long long i = 5; i <= sqrt_n; i += 6) {
-        if (n % i == 0 || n % (i + 2) == 0) return 0;
+// Function to verify primality
+long long isPrime(long long num) {
+    if (num <= 1) { 
+        return 0;
+    }
+
+    for (long long i = 2 ; i*i <= num; i++) {
+        if (num % i == 0) {
+            return 0;
+        }
     }
     return 1;
 }
 
 // Function to calculate GCD using Euclidean algorithm
 long long gcd(long long a, long long b) {
-    while (b != 0) {
-        long long temp = b;
-        b = a % b;
-        a = temp;
+    if (a == 0) {
+        return b;
     }
-    return a;
+    return gcd(b % a, a);
 }
 
 // Extended Euclidean Algorithm to find modular multiplicative inverse
-long long extended_gcd(long long a, long long b, long long *x, long long *y) {
+long long extendedEA(long long a, long long b, long long *x, long long *y) {
     if (b == 0) {
         *x = 1;
         *y = 0;
@@ -179,56 +176,25 @@ long long extended_gcd(long long a, long long b, long long *x, long long *y) {
     }
     
     long long x1, y1;
-    long long gcd_val = extended_gcd(b, a % b, &x1, &y1);
+    long long gcd = extendedEA(b, a % b, &x1, &y1);
     
     *x = y1;
     *y = x1 - (a / b) * y1;
     
-    return gcd_val;
+    return gcd;
 }
 
-// Function to calculate modular multiplicative inverse
-long long mod_inverse(long long e, long long phi_n) {
-    long long x, y;
-    long long gcd_val = extended_gcd(e, phi_n, &x, &y);
-    
-    if (gcd_val != 1) {
-        return -1; // Inverse doesn't exist
-    }
-    
-    // Make sure x is positive
-    long long result = (x % phi_n + phi_n) % phi_n;
-    return result;
-}
-
-// Efficient modular exponentiation
-long long mod_exp(long long base, long long exp, long long mod) {
+// Function to perform efficient modular exponentiation
+long long modExpo(long long base, long long exp, long long mod) {
     long long result = 1;
-    base = base % mod;
-    
+
     while (exp > 0) {
         if (exp % 2 == 1) {
             result = (result * base) % mod;
         }
-        exp = exp >> 1;
         base = (base * base) % mod;
+        exp = exp / 2;
     }
     
     return result;
-}
-
-// Function to preprocess message (keep only alphanumeric)
-char* preprocess_message(const char *input) {
-    int len = strlen(input);
-    char *output = (char*)malloc(len + 1);
-    int j = 0;
-    
-    for (int i = 0; i < len; i++) {
-        if (isalnum(input[i])) {
-            output[j++] = input[i];
-        }
-    }
-    output[j] = '\0';
-    
-    return output;
 }
